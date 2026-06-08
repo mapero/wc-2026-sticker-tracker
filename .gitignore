@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+*.tsbuildinfo
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# Album reference photos (large binaries, not source)
+*.heic
+
+# Editor / OS cruft
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Lint cache
+.eslintcache
+
+# Logs
+*.log
+npm-debug.log*
