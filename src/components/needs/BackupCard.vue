@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { FileJson, Upload, Trash2 } from "lucide-vue-next";
+import { FileJson, Upload, Trash2, Copy } from "lucide-vue-next";
 import { useCollectionStore } from "@/stores/collection";
 import { downloadText } from "@/utils/download";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -66,6 +66,12 @@ function onReset(): void {
         store.reset();
     }
 }
+
+function onClearSwaps(): void {
+    if (window.confirm(t("clear-swaps-confirm"))) {
+        store.clearSwaps();
+    }
+}
 </script>
 
 <template>
@@ -112,6 +118,16 @@ function onReset(): void {
         </p>
 
         <hr class="rule" />
+
+        <div class="danger-zone">
+            <div>
+                <strong class="danger-zone__title">{{ $t("clear-swaps") }}</strong>
+                <p class="card__desc">{{ $t("clear-swaps-desc") }}</p>
+            </div>
+            <base-button :disabled="store.duplicateCount === 0" @click="onClearSwaps">
+                <copy :size="16" /> {{ $t("clear-swaps") }}
+            </base-button>
+        </div>
 
         <div class="danger-zone">
             <div>
@@ -229,5 +245,8 @@ function onReset(): void {
     font-family: var(--font-display);
     font-size: 1.05rem;
     color: var(--danger);
+}
+.danger-zone__title {
+    color: var(--wc-text) !important;
 }
 </style>

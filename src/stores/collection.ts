@@ -117,6 +117,11 @@ export const useCollectionStore = defineStore("collection", () => {
     function reset() {
         counts.value = {};
     }
+    function clearSwaps() {
+        for (const [code, n] of Object.entries(counts.value)) {
+            if (n > 1) counts.value[code] = 1;
+        }
+    }
     function fillSection(codes: string[]) {
         for (const code of codes) if (!has(code)) setCount(code, 1);
     }
@@ -173,6 +178,7 @@ export const useCollectionStore = defineStore("collection", () => {
         fillSection,
         clearSection,
         reset,
+        clearSwaps,
         ownedCount,
         totalCount,
         missingCount,

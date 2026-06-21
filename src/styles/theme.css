@@ -175,6 +175,14 @@ button {
 .btn:active {
   transform: translateY(0.5px);
 }
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn:disabled:hover {
+  background: var(--n-800);
+  border-color: var(--wc-line-strong);
+}
 .btn-primary {
   background: var(--success);
   border-color: var(--success);
