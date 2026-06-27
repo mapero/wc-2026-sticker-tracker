@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { StickerType, type Sticker } from "@/data/album";
 import { useCollectionStore } from "@/stores/collection";
+import { useLongPress } from "@/composables/useLongPress";
 
 const props = withDefaults(
     defineProps<{
@@ -30,12 +31,26 @@ watch(owned, (now, prev) => {
         popTimer = setTimeout(() => (popping.value = false), 420);
     }
 });
+
 onBeforeUnmount(() => clearTimeout(popTimer));
+
+// Adding a sticker is a tap; removing an owned one requires a long press so it
+// can't happen by accident.
+const locked = computed(() => store.activeLocked);
+const press = useLongPress(
+    () => {
+        store.toggle(props.sticker.code);
+        emit("select", props.sticker);
+        navigator.vibrate?.(18);
+    },
+    { enabled: () => owned.value && !locked.value }
+);
 
 const toggleLabel = computed(() => {
     const s = props.sticker;
     const status = owned.value ? t("status-owned") : t("status-needed");
-    return `${s.code} ${s.label}${status}`;
+    const hint = owned.value && !locked.value ? ` · ${t("long-press-to-remove")}` : "";
+    return `${s.code} ${s.label}${status}${hint}`;
 });
 
 const title = computed(() => {
@@ -45,9 +60,15 @@ const title = computed(() => {
     return parts.join(" · ");
 });
 
-function onClick() {
-    store.toggle(props.sticker.code);
-    emit("select", props.sticker);
+function onClick(e: MouseEvent) {
+    if (press.consumed()) return; // long press already handled the removal
+    // Keyboard activation (Enter/Space) reports detail 0 — allow a direct toggle
+    // there for accessibility; pointer taps only add (removal needs the hold).
+    const viaKeyboard = e.detail === 0;
+    if (!owned.value || viaKeyboard) {
+        store.toggle(props.sticker.code);
+        emit("select", props.sticker);
+    }
 }
 </script>
 
@@ -61,6 +82,7 @@ function onClick() {
             sticker.foil && owned ? 'foil' : '',
             sticker.type === StickerType.TeamPhoto ? 'slot--photo' : '',
             popping ? 'slot--pop' : '',
+            press.arming.value ? 'slot--arming' : '',
         ]"
     >
         <button
@@ -70,6 +92,11 @@ function onClick() {
             :aria-label="toggleLabel"
             :title="title"
             @click="onClick"
+            @pointerdown="press.down"
+            @pointerup="press.end"
+            @pointerleave="press.end"
+            @pointercancel="press.end"
+            @pointermove="press.move"
         />
 
         <div class="slot__top">
@@ -181,6 +208,23 @@ function onClick() {
 }
 @media (prefers-reduced-motion: reduce) {
     .slot--pop {
+        animation: none;
+    }
+}
+
+/* "Hold to remove" cue: shrink + red ring while the long press is arming. */
+.slot--arming {
+    animation: slot-arm 0.5s ease forwards;
+    box-shadow: 0 0 0 2px var(--danger, #e5484d);
+    z-index: 2;
+}
+@keyframes slot-arm {
+    to {
+        transform: scale(0.88);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .slot--arming {
         animation: none;
     }
 }
