@@ -1,0 +1,33 @@
+# Two services:
+#   sync — the Node + SQLite sync backend (data persisted in a named volume)
+#   web  — the static SPA served by nginx, which proxies /api -> sync
+#
+# Quick start:  docker compose up -d --build   then open http://localhost:8080
+services:
+    sync:
+        build: ./server
+        restart: unless-stopped
+        environment:
+            PORT: "8787"
+            SYNC_DB_PATH: /app/data/sync.db
+        volumes:
+            - sync-data:/app/data
+        # Uncomment to reach the API directly (otherwise it's only used via web):
+        # ports:
+        #   - "8787:8787"
+
+    web:
+        build:
+            context: .
+            args:
+                # Root-served; calls /api on its own origin (proxied to sync).
+                VITE_BASE: /
+                VITE_SYNC_URL: ""
+        restart: unless-stopped
+        ports:
+            - "${WEB_PORT:-8080}:80"
+        depends_on:
+            - sync
+
+volumes:
+    sync-data:
