@@ -15,6 +15,10 @@ function onLanguageChange(event: Event) {
     void setLanguage((event.target as HTMLSelectElement).value);
 }
 
+function onCollectionChange(event: Event) {
+    store.setActiveCollection((event.target as HTMLSelectElement).value);
+}
+
 function exportCollection() {
     downloadText("wc2026-collection.json", store.exportJSON(), "application/json");
 }
@@ -67,7 +71,31 @@ function exportCollection() {
                         </svg>
                         {{ $t("needs-swaps-backup") }}
                     </router-link>
+                    <router-link to="/collections" class="nav__link">
+                        <svg class="nav__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                            <path d="M4 7h16M4 12h16M4 17h16" />
+                        </svg>
+                        {{ $t("collections") }}
+                    </router-link>
                 </nav>
+
+                <label class="lang coll">
+                    <span class="sr-only">{{ $t("active-collection") }}</span>
+                    <svg class="lang__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                        <rect x="4" y="4" width="16" height="6" rx="1.4" />
+                        <rect x="4" y="14" width="16" height="6" rx="1.4" />
+                    </svg>
+                    <select
+                        class="lang__select"
+                        :value="store.activeId"
+                        :aria-label="$t('active-collection')"
+                        @change="onCollectionChange"
+                    >
+                        <option v-for="c in store.collections" :key="c.id" :value="c.id">
+                            {{ c.name }}
+                        </option>
+                    </select>
+                </label>
 
                 <div class="progress">
                     <div class="progress__stat num">
@@ -243,8 +271,16 @@ function exportCollection() {
     background: var(--accent);
 }
 
-.progress {
+.coll {
     margin-left: auto;
+    max-width: 180px;
+}
+.coll .lang__select {
+    max-width: 180px;
+    text-overflow: ellipsis;
+}
+
+.progress {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -381,6 +417,14 @@ function exportCollection() {
         order: 2;
         width: 100%;
         margin-left: 0;
+    }
+    .coll {
+        order: 2;
+        margin-left: 0;
+        max-width: none;
+    }
+    .coll .lang__select {
+        max-width: none;
     }
     .topbar__export {
         order: 1;

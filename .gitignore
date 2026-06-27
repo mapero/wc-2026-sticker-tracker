@@ -24,6 +24,9 @@ dist-ssr/
 # Lint cache
 .eslintcache
 
+# Playwright MCP scratch artifacts
+.playwright-mcp/
+
 # Logs
 *.log
 npm-debug.log*
