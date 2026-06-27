@@ -2,11 +2,14 @@ import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import { STICKERS, TEAMS, TOTAL_STICKERS, STICKER_BY_CODE, type Sticker, type TeamSection } from "@/data/album";
 import { createSyncCode, pullCollections, pushCollections, SyncError, type SyncCollectionDTO } from "@/sync/client";
+import { parseCounts } from "./backup";
 
 const STORAGE_KEY = "wc2026-collections-v1";
 const LEGACY_KEY = "wc2026-collection-v1";
 const DEFAULT_NAME = "My Collection";
+const DEFAULT_ID = "default";
 const AUTO_SYNC_DELAY = 1500;
+const POLL_INTERVAL = 8000;
 
 type Counts = Record<string, number>;
 
@@ -70,6 +73,22 @@ function makeCollection(name: string): Collection {
     return { id: newId(), name: name.trim() || DEFAULT_NAME, counts: {}, createdAt: t, updatedAt: t, deletedAt: null };
 }
 
+// The bootstrap/default collection uses a stable id so independent devices
+// converge on a single collection instead of each migrating to a random id and
+// duplicating once they sync. An empty default keeps updatedAt=0 so it can never
+// overwrite real data on another device during a last-write-wins merge.
+function makeDefaultCollection(counts: Counts): Collection {
+    const hasData = Object.keys(counts).length > 0;
+    return {
+        id: DEFAULT_ID,
+        name: DEFAULT_NAME,
+        counts,
+        createdAt: 0,
+        updatedAt: hasData ? now() : 0,
+        deletedAt: null,
+    };
+}
+
 /** Build the initial state, migrating from the legacy single-collection key. */
 function loadState(): PersistedState {
     try {
@@ -101,15 +120,16 @@ function loadState(): PersistedState {
         console.warn("Could not load collections from localStorage:", err);
     }
 
-    // Migrate legacy single-collection storage, if any.
-    const migrated = makeCollection(DEFAULT_NAME);
+    // Bootstrap a stable default collection, migrating legacy data if present.
+    let counts: Counts = {};
     try {
         const legacy = localStorage.getItem(LEGACY_KEY);
-        if (legacy) migrated.counts = sanitizeCounts(JSON.parse(legacy));
+        if (legacy) counts = sanitizeCounts(JSON.parse(legacy));
     } catch (err) {
         console.warn("Could not migrate legacy collection:", err);
     }
-    return { version: 2, collections: [migrated], activeId: migrated.id, syncCode: null };
+    const fallback = makeDefaultCollection(counts);
+    return { version: 2, collections: [fallback], activeId: fallback.id, syncCode: null };
 }
 
 export function normalizeSyncCode(raw: string): string {
@@ -132,9 +152,17 @@ export const useCollectionStore = defineStore("collection", () => {
 
     function ensureActive(): void {
         if (!visibleCollections.value.length) {
-            const c = makeCollection(DEFAULT_NAME);
-            collections.value.push(c);
-            activeId.value = c.id;
+            // Resurrect the stable default rather than minting a new random id.
+            const existing = collections.value.find((c) => c.id === DEFAULT_ID);
+            if (existing) {
+                existing.deletedAt = null;
+                existing.updatedAt = now();
+            } else {
+                const c = makeDefaultCollection({});
+                c.updatedAt = now();
+                collections.value.push(c);
+            }
+            activeId.value = DEFAULT_ID;
         } else if (!visibleCollections.value.some((c) => c.id === activeId.value)) {
             activeId.value = visibleCollections.value[0].id;
         }
@@ -321,32 +349,6 @@ export const useCollectionStore = defineStore("collection", () => {
             2
         );
     }
-    function parseCounts(json: string): { ok: boolean; counts?: Counts; imported?: number; error?: string } {
-        try {
-            const parsed = JSON.parse(json);
-            const isBackup = !!parsed && typeof parsed === "object" && !Array.isArray(parsed) && "counts" in parsed;
-            const incoming: unknown = isBackup ? (parsed as { counts: unknown }).counts : parsed;
-            if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
-                return { ok: false, error: "No counts object found in file." };
-            }
-            const entries = Object.entries(incoming as Record<string, unknown>);
-            const next: Counts = {};
-            let imported = 0;
-            for (const [code, n] of entries) {
-                const v = typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : 0;
-                if (STICKER_BY_CODE[code] && v > 0) {
-                    next[code] = v;
-                    imported += 1;
-                }
-            }
-            if (imported === 0 && !(isBackup && entries.length === 0)) {
-                return { ok: false, error: "No recognised sticker codes in file." };
-            }
-            return { ok: true, counts: next, imported };
-        } catch (err) {
-            return { ok: false, error: err instanceof Error ? err.message : "Invalid JSON." };
-        }
-    }
     function importJSON(json: string): { ok: boolean; error?: string; imported?: number } {
         const res = parseCounts(json);
         if (!res.ok || !res.counts) return { ok: false, error: res.error };
@@ -370,15 +372,28 @@ export const useCollectionStore = defineStore("collection", () => {
         };
     }
 
-    function adoptMerged(merged: SyncCollectionDTO[]): void {
-        collections.value = merged.map((m) => ({
-            id: m.id,
-            name: m.name,
-            counts: sanitizeCounts(m.counts),
-            createdAt: m.createdAt,
-            updatedAt: m.updatedAt,
-            deletedAt: m.deletedAt ?? null,
-        }));
+    /**
+     * Merge server collections into local state by id (last-write-wins on
+     * updatedAt). Local-only entries not yet pushed, and local edits newer than
+     * the server copy, are preserved — so background polling never clobbers
+     * in-flight work.
+     */
+    function adoptMerged(incoming: SyncCollectionDTO[]): void {
+        const byId = new Map<string, Collection>();
+        for (const c of collections.value) byId.set(c.id, c);
+        for (const m of incoming) {
+            const local = byId.get(m.id);
+            if (local && local.updatedAt >= m.updatedAt) continue;
+            byId.set(m.id, {
+                id: m.id,
+                name: m.name,
+                counts: sanitizeCounts(m.counts),
+                createdAt: m.createdAt,
+                updatedAt: m.updatedAt,
+                deletedAt: m.deletedAt ?? null,
+            });
+        }
+        collections.value = [...byId.values()];
         ensureActive();
     }
 
@@ -389,8 +404,11 @@ export const useCollectionStore = defineStore("collection", () => {
         syncTimer = setTimeout(() => void syncNow(), AUTO_SYNC_DELAY);
     }
 
+    let syncInFlight = false;
     async function syncNow(): Promise<{ ok: boolean; error?: string }> {
         if (!syncCode.value) return { ok: false, error: "not-enabled" };
+        if (syncInFlight) return { ok: false, error: "busy" };
+        syncInFlight = true;
         clearTimeout(syncTimer);
         syncStatus.value = "syncing";
         syncError.value = null;
@@ -405,6 +423,8 @@ export const useCollectionStore = defineStore("collection", () => {
             syncError.value = code;
             syncStatus.value = "error";
             return { ok: false, error: code };
+        } finally {
+            syncInFlight = false;
         }
     }
 
@@ -418,6 +438,7 @@ export const useCollectionStore = defineStore("collection", () => {
             adoptMerged(merged);
             lastSyncedAt.value = now();
             syncStatus.value = "ok";
+            startPolling();
             return { ok: true, code };
         } catch (err) {
             syncCode.value = null;
@@ -439,6 +460,7 @@ export const useCollectionStore = defineStore("collection", () => {
             adoptMerged(merged);
             lastSyncedAt.value = now();
             syncStatus.value = "ok";
+            startPolling();
             return { ok: true };
         } catch (err) {
             const e = err instanceof SyncError ? (err.code ?? err.message) : "unknown";
@@ -450,10 +472,38 @@ export const useCollectionStore = defineStore("collection", () => {
 
     function disableSync(): void {
         clearTimeout(syncTimer);
+        stopPolling();
         syncCode.value = null;
         syncStatus.value = "idle";
         syncError.value = null;
         lastSyncedAt.value = null;
+    }
+
+    // Background pull: while sync is on, periodically pull remote changes so
+    // other devices' edits show up without requiring a local edit first.
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    function startPolling(): void {
+        stopPolling();
+        if (!syncCode.value) return;
+        pollTimer = setInterval(() => {
+            if (syncStatus.value !== "syncing") void syncNow();
+        }, POLL_INTERVAL);
+    }
+    function stopPolling(): void {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = undefined;
+    }
+
+    // If a sync code was restored from a previous session, sync immediately and
+    // start polling. Also re-sync whenever the tab regains focus.
+    if (syncCode.value) {
+        void syncNow();
+        startPolling();
+    }
+    if (typeof document !== "undefined") {
+        document.addEventListener("visibilitychange", () => {
+            if (!document.hidden && syncCode.value && syncStatus.value !== "syncing") void syncNow();
+        });
     }
 
     return {
