@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { Trophy, Check } from "lucide-vue-next";
-import { SECTIONS, GROUPS, INTRO_SECTION, type TeamSection } from "@/data/album";
+import { SECTIONS, GROUPS, INTRO_SECTION, type TeamSection, type IntroSection } from "@/data/album";
 import { useCollectionStore } from "@/stores/collection";
 
 defineProps<{ activeId: string }>();
@@ -37,6 +37,12 @@ const railGroups = computed<RailGroup[]>(() =>
                 return { team, owned: p.owned, total: p.total, complete: p.complete };
             }),
     }))
+);
+
+// Special (non-team) sections shown after the team groups, e.g. extra/sponsor
+// stickers. The intro section keeps its own pinned button at the top.
+const extraSections = computed<IntroSection[]>(() =>
+    SECTIONS.filter((s): s is IntroSection => s.kind === "INTRO" && s.id !== INTRO_SECTION.id)
 );
 
 const flatSections = computed(() =>
@@ -106,6 +112,18 @@ function onSelectChange(e: Event) {
                     </span>
                 </button>
             </div>
+
+            <button
+                v-for="sp in extraSections"
+                :key="sp.id"
+                class="rail__intro rail__intro--extra"
+                :class="{ 'is-active': activeId === sp.id }"
+                type="button"
+                @click="emit('select', sp.id)"
+            >
+                <span class="rail__intro-icon" aria-hidden="true">{{ sp.flag }}</span>
+                <span class="rail__name">{{ sp.title }}</span>
+            </button>
         </nav>
     </aside>
 </template>
@@ -163,6 +181,9 @@ function onSelectChange(e: Event) {
 }
 .rail__intro:hover {
     background: var(--wc-panel-2);
+}
+.rail__intro--extra {
+    margin-top: 12px;
 }
 .rail__intro.is-active {
     border-color: var(--accent);

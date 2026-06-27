@@ -12,6 +12,7 @@ export enum StickerType {
     Host = "HOST",
     Intro = "INTRO",
     Champion = "CHAMPION",
+    Sponsor = "SPONSOR",
 }
 
 export interface Sticker {
@@ -45,7 +46,7 @@ export interface TeamSection {
 }
 
 export interface IntroSection {
-    id: "intro";
+    id: string;
     kind: "INTRO";
     name: string;
     title: string;
@@ -139,6 +140,23 @@ interface IntroDef {
     label: string;
     type: StickerType;
 }
+
+// Coca-Cola x Panini stickers — a 12-sticker promo set (CC1-CC12) found only on
+// marked Coca-Cola bottles, with reserved space in the official album.
+const EXTRA_STICKERS: IntroDef[] = [
+    { code: "CC1", label: "Lamine Yamal (Spain)", type: StickerType.Sponsor },
+    { code: "CC2", label: "Joshua Kimmich (Germany)", type: StickerType.Sponsor },
+    { code: "CC3", label: "Harry Kane (England)", type: StickerType.Sponsor },
+    { code: "CC4", label: "Santiago Giménez (Mexico)", type: StickerType.Sponsor },
+    { code: "CC5", label: "Antonee Robinson (USA)", type: StickerType.Sponsor },
+    { code: "CC6", label: "Jefferson Lerma (Colombia)", type: StickerType.Sponsor },
+    { code: "CC7", label: "Edson Álvarez (Mexico)", type: StickerType.Sponsor },
+    { code: "CC8", label: "Virgil van Dijk (Netherlands)", type: StickerType.Sponsor },
+    { code: "CC9", label: "Alphonso Davies (Canada)", type: StickerType.Sponsor },
+    { code: "CC10", label: "Weston McKennie (USA)", type: StickerType.Sponsor },
+    { code: "CC11", label: "Lautaro Martínez (Argentina)", type: StickerType.Sponsor },
+    { code: "CC12", label: "Gabriel Magalhães (Brazil)", type: StickerType.Sponsor },
+];
 
 const INTRO_STICKERS: IntroDef[] = [
     { code: "00", label: "Panini Logo", type: StickerType.Logo },
@@ -287,10 +305,40 @@ function buildAlbum() {
         }
     }
 
-    const sections: Section[] = [introSection, ...teams];
+    const extrasSection: IntroSection = {
+        id: "extras",
+        kind: "INTRO",
+        name: "Coca-Cola",
+        title: "Coca-Cola Stickers",
+        flag: "🥤",
+        color: "#e61a27",
+        accent: "#1a1a1a",
+        stickerCodes: [],
+    };
+    EXTRA_STICKERS.forEach((s, i) => {
+        seq += 1;
+        stickers.push({
+            id: s.code,
+            code: s.code,
+            seq,
+            section: extrasSection.id,
+            sectionTitle: extrasSection.title,
+            group: null,
+            teamName: null,
+            teamCode: null,
+            type: s.type,
+            label: s.label,
+            foil: false,
+            page: 1,
+            slot: i + 1,
+        });
+        extrasSection.stickerCodes.push(s.code);
+    });
+
+    const sections: Section[] = [introSection, ...teams, extrasSection];
     const byCode: Record<string, Sticker> = Object.fromEntries(stickers.map((s) => [s.code, s]));
 
-    return { stickers, teams, sections, introSection, byCode };
+    return { stickers, teams, sections, introSection, extrasSection, byCode };
 }
 
 const album = buildAlbum();
@@ -299,6 +347,7 @@ export const STICKERS: Sticker[] = album.stickers;
 export const TEAMS: TeamSection[] = album.teams;
 export const SECTIONS: Section[] = album.sections;
 export const INTRO_SECTION: IntroSection = album.introSection;
+export const EXTRAS_SECTION: IntroSection = album.extrasSection;
 export const STICKER_BY_CODE: Record<string, Sticker> = album.byCode;
 export const TOTAL_STICKERS = STICKERS.length;
 
