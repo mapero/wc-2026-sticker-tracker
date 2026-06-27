@@ -38,6 +38,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import("@/views/NeedsView.vue"),
         meta: { title: "needs-swaps-backup" },
     },
+    {
+        path: "/collections",
+        name: "collections",
+        component: () => import("@/views/CollectionsView.vue"),
+        meta: { title: "collections" },
+    },
 ];
 
 const router = createRouter({
