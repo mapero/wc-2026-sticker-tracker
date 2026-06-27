@@ -12,9 +12,19 @@ browser ──▶ web (nginx :80) ──/api──▶ sync (node :8787) ──�
 
 ## Quick start
 
+`docker-compose.yml` pulls the prebuilt images from GitHub Container Registry:
+
+```bash
+docker compose pull
+docker compose up -d
+# open http://localhost:8080
+```
+
+To build the images locally instead of pulling (e.g. for development), add
+`--build`:
+
 ```bash
 docker compose up -d --build
-# open http://localhost:8080
 ```
 
 Then go to **Collections → Sync → Enable sync** on one device and **Pair with a
@@ -116,15 +126,11 @@ or manually (Actions → Run workflow):
 Tags include `latest` (default branch), the branch name, a `sha-<commit>` tag,
 and semver tags (`1.2.3`, `1.2`) when you push a `vX.Y.Z` git tag.
 
-To run published images instead of building locally, replace each service's
-`build:` with `image:` in `docker-compose.yml`, e.g.:
+`docker-compose.yml` already references these images and pulls `latest` by
+default. Pin a specific tag with `IMAGE_TAG`:
 
-```yaml
-services:
-  sync:
-    image: ghcr.io/<owner>/<repo>-sync:latest
-  web:
-    image: ghcr.io/<owner>/<repo>-web:latest
+```bash
+IMAGE_TAG=v1.2.3 docker compose up -d
 ```
 
 > Packages inherit the repo's visibility intent but are created **private** by

@@ -2,9 +2,15 @@
 #   sync — the Node + SQLite sync backend (data persisted in a named volume)
 #   web  — the static SPA served by nginx, which proxies /api -> sync
 #
-# Quick start:  docker compose up -d --build   then open http://localhost:8080
+# Uses the images published to GitHub Container Registry by the
+# docker-publish workflow. Override the tag with IMAGE_TAG (default: latest).
+# The build: sections are kept so `docker compose build` still works locally;
+# `docker compose pull` / `up` use the registry images.
+#
+# Quick start:  docker compose pull && docker compose up -d   then open :8080
 services:
     sync:
+        image: ghcr.io/mapero/wc-2026-sticker-tracker-sync:${IMAGE_TAG:-latest}
         build: ./server
         restart: unless-stopped
         environment:
@@ -17,6 +23,7 @@ services:
         #   - "8787:8787"
 
     web:
+        image: ghcr.io/mapero/wc-2026-sticker-tracker-web:${IMAGE_TAG:-latest}
         build:
             context: .
             args:
