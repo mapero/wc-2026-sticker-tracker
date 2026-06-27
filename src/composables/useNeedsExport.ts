@@ -61,34 +61,18 @@ export function useNeedsExport(): UseNeedsExport {
         return stickers.filter((s) => s.section !== "intro");
     }
 
-    const neededStickers = computed<Sticker[]>(() => applyIntroFilter(store.missingStickers));
-
-    const neededCount = computed<number>(() => neededStickers.value.length);
-
-    const scopeTotal = computed<number>(() =>
-        includeIntro.value ? TOTAL_STICKERS : TOTAL_STICKERS - INTRO_SECTION.stickerCodes.length
-    );
-    const scopeComplete = computed<string>(() =>
-        includeIntro.value ? t("export-album-complete") : t("export-teams-complete")
-    );
-
-    const needsText = computed<string>(() => {
-        const title = `${ALBUM_META.title} · ${t("export-needs-title", { needed: neededCount.value, total: scopeTotal.value })}`;
-        const list = neededStickers.value;
-
+    // Shared renderer for both lists: applies grouping, detail and compactness.
+    function renderList(list: Sticker[], title: string, emptyText: string): string {
         if (list.length === 0) {
-            return `${title}\n\n${scopeComplete.value}`;
+            return `${title}\n\n${emptyText}`;
         }
 
         const lines: string[] = [title, ""];
 
         if (grouping.value === "flat") {
             const entries = list.map(renderSticker);
-            if (compactness.value === "commas") {
-                lines.push(entries.join(", "));
-            } else {
-                lines.push(...entries);
-            }
+            if (compactness.value === "commas") lines.push(entries.join(", "));
+            else lines.push(...entries);
             return lines.join("\n");
         }
 
@@ -105,44 +89,39 @@ export function useNeedsExport(): UseNeedsExport {
         });
 
         return lines.join("\n");
+    }
+
+    const neededStickers = computed<Sticker[]>(() => applyIntroFilter(store.missingStickers));
+
+    const neededCount = computed<number>(() => neededStickers.value.length);
+
+    const scopeTotal = computed<number>(() =>
+        includeIntro.value ? TOTAL_STICKERS : TOTAL_STICKERS - INTRO_SECTION.stickerCodes.length
+    );
+    const scopeComplete = computed<string>(() =>
+        includeIntro.value ? t("export-album-complete") : t("export-teams-complete")
+    );
+
+    const needsText = computed<string>(() => {
+        const title = `${ALBUM_META.title} · ${t("export-needs-title", { needed: neededCount.value, total: scopeTotal.value })}`;
+        return renderList(neededStickers.value, title, scopeComplete.value);
     });
 
-    const swapEntries = computed(() => store.duplicateStickers);
+    // Each spare is listed individually — a sticker with N duplicates appears N times.
+    const swapStickers = computed<Sticker[]>(() => {
+        const out: Sticker[] = [];
+        for (const { sticker, spare } of store.duplicateStickers) {
+            if (!includeIntro.value && sticker.section === "intro") continue;
+            for (let i = 0; i < spare; i++) out.push(sticker);
+        }
+        return out;
+    });
 
-    const swapCount = computed<number>(() => store.duplicateCount);
+    const swapCount = computed<number>(() => swapStickers.value.length);
 
     const swapsText = computed<string>(() => {
-        const entries = swapEntries.value;
         const title = `${ALBUM_META.title} · ${t("export-swaps-title", { count: swapCount.value })}`;
-
-        if (entries.length === 0) {
-            return `${title}\n\n${t("export-no-duplicates")}`;
-        }
-
-        const lines: string[] = [title, ""];
-        const groups = new Map<string, { header: string; rows: string[] }>();
-        const order: string[] = [];
-
-        for (const { sticker: s, spare } of entries) {
-            let bucket = groups.get(s.section);
-            if (!bucket) {
-                const header = s.teamCode != null ? `${s.teamName} (${s.teamCode})` : s.sectionTitle;
-                bucket = { header, rows: [] };
-                groups.set(s.section, bucket);
-                order.push(s.section);
-            }
-            bucket.rows.push(`${s.code} · ${s.label} ${t("export-spare-count", { n: spare })}`);
-        }
-
-        order.forEach((key, i) => {
-            const g = groups.get(key);
-            if (!g) return;
-            lines.push(g.header);
-            lines.push(...g.rows);
-            if (i < order.length - 1) lines.push("");
-        });
-
-        return lines.join("\n");
+        return renderList(swapStickers.value, title, t("export-no-duplicates"));
     });
 
     return {
