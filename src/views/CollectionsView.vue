@@ -1,7 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { Plus, Check, Pencil, Copy, Trash2, RefreshCw, ClipboardCheck, Link2, Unlink } from "lucide-vue-next";
+import {
+    Plus,
+    Check,
+    Pencil,
+    Copy,
+    Trash2,
+    RefreshCw,
+    ClipboardCheck,
+    Link2,
+    Unlink,
+    Lock,
+    LockOpen,
+} from "lucide-vue-next";
 import { useCollectionStore } from "@/stores/collection";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseChip from "@/components/base/BaseChip.vue";
@@ -81,9 +93,14 @@ const lastSyncedText = computed(() =>
             >
                 <div class="col__top">
                     <h2 class="col__name">{{ collection.name }}</h2>
-                    <base-chip v-if="collection.id === store.activeId" variant="done">
-                        <check :size="13" /> {{ $t("active") }}
-                    </base-chip>
+                    <div class="col__badges">
+                        <base-chip v-if="collection.locked" variant="swap">
+                            <lock :size="12" /> {{ $t("locked") }}
+                        </base-chip>
+                        <base-chip v-if="collection.id === store.activeId" variant="done">
+                            <check :size="13" /> {{ $t("active") }}
+                        </base-chip>
+                    </div>
                 </div>
 
                 <div class="col__statline num">
@@ -119,7 +136,16 @@ const lastSyncedText = computed(() =>
                     >
                         {{ $t("make-active") }}
                     </base-button>
-                    <base-button size="sm" @click="rename(collection.id, collection.name)">
+                    <base-button size="sm" @click="store.toggleLock(collection.id)">
+                        <lock-open v-if="collection.locked" :size="14" />
+                        <lock v-else :size="14" />
+                        {{ collection.locked ? $t("unlock") : $t("lock") }}
+                    </base-button>
+                    <base-button
+                        size="sm"
+                        :disabled="collection.locked"
+                        @click="rename(collection.id, collection.name)"
+                    >
                         <pencil :size="14" /> {{ $t("rename") }}
                     </base-button>
                     <base-button size="sm" @click="store.duplicateCollection(collection.id)">
@@ -128,7 +154,7 @@ const lastSyncedText = computed(() =>
                     <base-button
                         variant="danger"
                         size="sm"
-                        :disabled="store.collections.length <= 1"
+                        :disabled="collection.locked || store.collections.length <= 1"
                         @click="remove(collection.id, collection.name)"
                     >
                         <trash2 :size="14" /> {{ $t("delete") }}
@@ -272,6 +298,13 @@ const lastSyncedText = computed(() =>
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+}
+.col__badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 .col__name {
     font-family: var(--font-display);

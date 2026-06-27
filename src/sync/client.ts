@@ -6,9 +6,12 @@ export interface SyncCollectionDTO {
     id: string;
     name: string;
     counts: Record<string, number>;
+    countsAt: Record<string, number>;
     createdAt: number;
     updatedAt: number;
     deletedAt: number | null;
+    locked: boolean;
+    lockedAt: number;
 }
 
 // In dev, the Vite proxy forwards /api -> the local server. In production set
@@ -62,7 +65,43 @@ export async function pullCollections(code: string): Promise<SyncCollectionDTO[]
 export async function pushCollections(code: string, collections: SyncCollectionDTO[]): Promise<SyncCollectionDTO[]> {
     const data = await request<{ collections: SyncCollectionDTO[] }>(`/sync/${encodeURIComponent(code)}`, {
         method: "POST",
-        body: JSON.stringify({ collections }),
+        body: JSON.stringify({ collections, clientId: getClientId() }),
     });
     return data.collections;
+}
+
+// A stable per-browser id so a device can ignore change events caused by its
+// own pushes.
+const CLIENT_ID_KEY = "wc2026-client-id";
+export function getClientId(): string {
+    let id: string | null = null;
+    try {
+        id = localStorage.getItem(CLIENT_ID_KEY);
+    } catch {
+        /* ignore */
+    }
+    if (!id) {
+        id =
+            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? crypto.randomUUID()
+                : `c-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        try {
+            localStorage.setItem(CLIENT_ID_KEY, id);
+        } catch {
+            /* ignore */
+        }
+    }
+    return id;
+}
+
+/**
+ * Subscribe to change events for a sync code. Calls onChange whenever another
+ * device updates the data. Returns a function that closes the stream. The
+ * browser's EventSource reconnects automatically on transient errors.
+ */
+export function openEventStream(code: string, onChange: () => void): () => void {
+    const url = `${BASE}/api/sync/${encodeURIComponent(code)}/events?clientId=${encodeURIComponent(getClientId())}`;
+    const es = new EventSource(url);
+    es.addEventListener("changed", () => onChange());
+    return () => es.close();
 }

@@ -1,36 +1,39 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import { STICKERS, TEAMS, TOTAL_STICKERS, STICKER_BY_CODE, type Sticker, type TeamSection } from "@/data/album";
-import { createSyncCode, pullCollections, pushCollections, SyncError, type SyncCollectionDTO } from "@/sync/client";
+import {
+    createSyncCode,
+    openEventStream,
+    pullCollections,
+    pushCollections,
+    SyncError,
+    type SyncCollectionDTO,
+} from "@/sync/client";
 import { parseCounts } from "./backup";
+import {
+    backfillTimestamps,
+    computeStats,
+    DEFAULT_ID,
+    DEFAULT_NAME,
+    loadState,
+    makeCollection,
+    makeDefaultCollection,
+    mergeCollection,
+    normalizeSyncCode,
+    now,
+    sanitizeCounts,
+    sanitizeTimestamps,
+    STORAGE_KEY,
+    type Collection,
+    type CollectionStats,
+    type Counts,
+    type PersistedState,
+} from "./collection-model";
 
-const STORAGE_KEY = "wc2026-collections-v1";
-const LEGACY_KEY = "wc2026-collection-v1";
-const DEFAULT_NAME = "My Collection";
-const DEFAULT_ID = "default";
-const AUTO_SYNC_DELAY = 1500;
-const POLL_INTERVAL = 8000;
+export type { Collection, CollectionStats } from "./collection-model";
+export { normalizeSyncCode } from "./collection-model";
 
-type Counts = Record<string, number>;
-
-export interface Collection {
-    id: string;
-    name: string;
-    counts: Counts;
-    createdAt: number;
-    updatedAt: number;
-    /** Tombstone — set when deleted so the deletion propagates through sync. */
-    deletedAt: number | null;
-}
-
-export interface CollectionStats {
-    owned: number;
-    total: number;
-    missing: number;
-    duplicates: number;
-    percent: number;
-    complete: boolean;
-}
+const AUTO_SYNC_DELAY = 800;
 
 export interface TeamProgress {
     team: TeamSection;
@@ -39,101 +42,6 @@ export interface TeamProgress {
     missing: string[];
     duplicates: string[];
     complete: boolean;
-}
-
-type PersistedState = {
-    version: 2;
-    activeId: string;
-    syncCode: string | null;
-    collections: Collection[];
-};
-
-function now(): number {
-    return Date.now();
-}
-
-function newId(): string {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
-    return `c-${now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function sanitizeCounts(raw: unknown): Counts {
-    const out: Counts = {};
-    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-        for (const [code, n] of Object.entries(raw as Record<string, unknown>)) {
-            const v = typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : 0;
-            if (STICKER_BY_CODE[code] && v > 0) out[code] = v;
-        }
-    }
-    return out;
-}
-
-function makeCollection(name: string): Collection {
-    const t = now();
-    return { id: newId(), name: name.trim() || DEFAULT_NAME, counts: {}, createdAt: t, updatedAt: t, deletedAt: null };
-}
-
-// The bootstrap/default collection uses a stable id so independent devices
-// converge on a single collection instead of each migrating to a random id and
-// duplicating once they sync. An empty default keeps updatedAt=0 so it can never
-// overwrite real data on another device during a last-write-wins merge.
-function makeDefaultCollection(counts: Counts): Collection {
-    const hasData = Object.keys(counts).length > 0;
-    return {
-        id: DEFAULT_ID,
-        name: DEFAULT_NAME,
-        counts,
-        createdAt: 0,
-        updatedAt: hasData ? now() : 0,
-        deletedAt: null,
-    };
-}
-
-/** Build the initial state, migrating from the legacy single-collection key. */
-function loadState(): PersistedState {
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-            const parsed = JSON.parse(raw) as Partial<PersistedState>;
-            if (parsed && Array.isArray(parsed.collections)) {
-                const collections = parsed.collections
-                    .filter((c): c is Collection => !!c && typeof c.id === "string")
-                    .map((c) => ({
-                        id: c.id,
-                        name: typeof c.name === "string" ? c.name : DEFAULT_NAME,
-                        counts: sanitizeCounts(c.counts),
-                        createdAt: Number.isFinite(c.createdAt) ? c.createdAt : now(),
-                        updatedAt: Number.isFinite(c.updatedAt) ? c.updatedAt : now(),
-                        deletedAt: Number.isFinite(c.deletedAt as number) ? (c.deletedAt as number) : null,
-                    }));
-                if (collections.some((c) => !c.deletedAt)) {
-                    return {
-                        version: 2,
-                        collections,
-                        activeId: typeof parsed.activeId === "string" ? parsed.activeId : "",
-                        syncCode: typeof parsed.syncCode === "string" ? parsed.syncCode : null,
-                    };
-                }
-            }
-        }
-    } catch (err) {
-        console.warn("Could not load collections from localStorage:", err);
-    }
-
-    // Bootstrap a stable default collection, migrating legacy data if present.
-    let counts: Counts = {};
-    try {
-        const legacy = localStorage.getItem(LEGACY_KEY);
-        if (legacy) counts = sanitizeCounts(JSON.parse(legacy));
-    } catch (err) {
-        console.warn("Could not migrate legacy collection:", err);
-    }
-    const fallback = makeDefaultCollection(counts);
-    return { version: 2, collections: [fallback], activeId: fallback.id, syncCode: null };
-}
-
-export function normalizeSyncCode(raw: string): string {
-    return raw.toUpperCase().replace(/\s+/g, "").trim();
 }
 
 export const useCollectionStore = defineStore("collection", () => {
@@ -173,6 +81,7 @@ export const useCollectionStore = defineStore("collection", () => {
         () => collections.value.find((c) => c.id === activeId.value && !c.deletedAt) ?? visibleCollections.value[0]
     );
     const activeName = computed(() => activeCollection.value?.name ?? DEFAULT_NAME);
+    const activeLocked = computed(() => !!activeCollection.value?.locked);
     const counts = computed<Counts>(() => activeCollection.value?.counts ?? {});
 
     // Persist to localStorage on any change.
@@ -208,10 +117,12 @@ export const useCollectionStore = defineStore("collection", () => {
 
     function setCount(code: string, n: number) {
         const c = activeCollection.value;
-        if (!c || !STICKER_BY_CODE[code] || !Number.isFinite(n)) return;
+        if (!c || c.locked || !STICKER_BY_CODE[code] || !Number.isFinite(n)) return;
         const value = Math.max(0, Math.floor(n));
         if (value === 0) delete c.counts[code];
         else c.counts[code] = value;
+        // Stamp this sticker so its change (including removal) wins per-code merges.
+        c.countsAt[code] = now();
         touchActive();
     }
     function toggle(code: string) {
@@ -262,14 +173,21 @@ export const useCollectionStore = defineStore("collection", () => {
 
     function reset() {
         const c = activeCollection.value;
-        if (!c) return;
+        if (!c || c.locked) return;
+        const t = now();
+        for (const code of Object.keys(c.counts)) c.countsAt[code] = t; // tombstone each removal
         c.counts = {};
         touchActive();
     }
     function clearSwaps() {
         const c = activeCollection.value;
-        if (!c) return;
-        for (const [code, n] of Object.entries(c.counts)) if (n > 1) c.counts[code] = 1;
+        if (!c || c.locked) return;
+        const t = now();
+        for (const [code, n] of Object.entries(c.counts))
+            if (n > 1) {
+                c.counts[code] = 1;
+                c.countsAt[code] = t;
+            }
         touchActive();
     }
     function fillSection(codes: string[]) {
@@ -280,24 +198,6 @@ export const useCollectionStore = defineStore("collection", () => {
     }
 
     // ---- multi-collection management ---------------------------------------
-
-    function computeStats(c: Counts): CollectionStats {
-        let owned = 0;
-        let dups = 0;
-        for (const s of STICKERS) {
-            const n = c[s.code] ?? 0;
-            if (n > 0) owned += 1;
-            if (n > 1) dups += n - 1;
-        }
-        return {
-            owned,
-            total: TOTAL_STICKERS,
-            missing: TOTAL_STICKERS - owned,
-            duplicates: dups,
-            percent: Math.round((owned / TOTAL_STICKERS) * 1000) / 10,
-            complete: owned === TOTAL_STICKERS,
-        };
-    }
 
     const allCollectionStats = computed<{ collection: Collection; stats: CollectionStats }[]>(() =>
         visibleCollections.value.map((c) => ({ collection: c, stats: computeStats(c.counts) }))
@@ -312,9 +212,18 @@ export const useCollectionStore = defineStore("collection", () => {
     }
     function renameCollection(id: string, name: string) {
         const c = collections.value.find((x) => x.id === id);
-        if (!c || !name.trim()) return;
+        if (!c || c.locked || !name.trim()) return;
         c.name = name.trim();
         c.updatedAt = now();
+        scheduleSync();
+    }
+    function toggleLock(id: string) {
+        const c = collections.value.find((x) => x.id === id);
+        if (!c || c.deletedAt) return;
+        c.locked = !c.locked;
+        // Tracked separately from updatedAt so lock toggles merge independently
+        // of content edits across devices.
+        c.lockedAt = now();
         scheduleSync();
     }
     function duplicateCollection(id: string): string | null {
@@ -329,7 +238,7 @@ export const useCollectionStore = defineStore("collection", () => {
     }
     function deleteCollection(id: string) {
         const c = collections.value.find((x) => x.id === id);
-        if (!c || c.deletedAt) return;
+        if (!c || c.deletedAt || c.locked) return;
         c.deletedAt = now();
         c.updatedAt = now();
         c.counts = {};
@@ -354,6 +263,9 @@ export const useCollectionStore = defineStore("collection", () => {
         if (!res.ok || !res.counts) return { ok: false, error: res.error };
         const c = activeCollection.value;
         if (!c) return { ok: false, error: "No active collection." };
+        if (c.locked) return { ok: false, error: "Collection is locked." };
+        const t = now();
+        for (const code of new Set([...Object.keys(c.counts), ...Object.keys(res.counts)])) c.countsAt[code] = t;
         c.counts = res.counts;
         touchActive();
         return { ok: true, imported: res.imported };
@@ -366,49 +278,65 @@ export const useCollectionStore = defineStore("collection", () => {
             id: c.id,
             name: c.name,
             counts: c.counts,
+            countsAt: c.countsAt,
             createdAt: c.createdAt,
             updatedAt: c.updatedAt,
             deletedAt: c.deletedAt,
+            locked: c.locked,
+            lockedAt: c.lockedAt,
+        };
+    }
+
+    function fromDTO(m: SyncCollectionDTO): Collection {
+        const counts = sanitizeCounts(m.counts);
+        const updatedAt = Number.isFinite(m.updatedAt) ? m.updatedAt : now();
+        return {
+            id: m.id,
+            name: m.name,
+            counts,
+            countsAt: backfillTimestamps(counts, sanitizeTimestamps(m.countsAt), updatedAt),
+            createdAt: m.createdAt,
+            updatedAt,
+            deletedAt: m.deletedAt ?? null,
+            locked: !!m.locked,
+            lockedAt: Number.isFinite(m.lockedAt) ? m.lockedAt : 0,
         };
     }
 
     /**
-     * Merge server collections into local state by id (last-write-wins on
-     * updatedAt). Local-only entries not yet pushed, and local edits newer than
-     * the server copy, are preserved — so background polling never clobbers
-     * in-flight work.
+     * Merge server collections into local state by id. Same-id collections are
+     * merged field-wise (per-sticker max counts, LWW name/lock), so concurrent
+     * edits across devices don't clobber each other and local in-flight edits
+     * survive. Local-only entries (not yet pushed) are preserved.
      */
     function adoptMerged(incoming: SyncCollectionDTO[]): void {
         const byId = new Map<string, Collection>();
         for (const c of collections.value) byId.set(c.id, c);
         for (const m of incoming) {
+            const remote = fromDTO(m);
             const local = byId.get(m.id);
-            if (local && local.updatedAt >= m.updatedAt) continue;
-            byId.set(m.id, {
-                id: m.id,
-                name: m.name,
-                counts: sanitizeCounts(m.counts),
-                createdAt: m.createdAt,
-                updatedAt: m.updatedAt,
-                deletedAt: m.deletedAt ?? null,
-            });
+            byId.set(m.id, local ? mergeCollection(local, remote) : remote);
         }
         collections.value = [...byId.values()];
         ensureActive();
     }
 
     let syncTimer: ReturnType<typeof setTimeout> | undefined;
+    let pendingPush = false;
     function scheduleSync(): void {
         if (!syncCode.value) return;
+        pendingPush = true;
         clearTimeout(syncTimer);
         syncTimer = setTimeout(() => void syncNow(), AUTO_SYNC_DELAY);
     }
 
     let syncInFlight = false;
+    /** Push local state and merge the server's response back in (outbound edits). */
     async function syncNow(): Promise<{ ok: boolean; error?: string }> {
         if (!syncCode.value) return { ok: false, error: "not-enabled" };
         if (syncInFlight) return { ok: false, error: "busy" };
         syncInFlight = true;
+        pendingPush = false;
         clearTimeout(syncTimer);
         syncStatus.value = "syncing";
         syncError.value = null;
@@ -428,6 +356,28 @@ export const useCollectionStore = defineStore("collection", () => {
         }
     }
 
+    /** Pull remote state and merge it locally without pushing (inbound, on a change event). */
+    async function pullSync(): Promise<void> {
+        if (!syncCode.value || syncInFlight) return;
+        syncInFlight = true;
+        try {
+            const remote = await pullCollections(syncCode.value);
+            adoptMerged(remote);
+            lastSyncedAt.value = now();
+            syncStatus.value = "ok";
+        } catch (err) {
+            syncError.value = err instanceof SyncError ? (err.code ?? err.message) : "unknown";
+            syncStatus.value = "error";
+        } finally {
+            syncInFlight = false;
+            // A local edit may have landed mid-pull — flush it.
+            if (pendingPush) {
+                clearTimeout(syncTimer);
+                void syncNow();
+            }
+        }
+    }
+
     async function enableSync(): Promise<{ ok: boolean; code?: string; error?: string }> {
         syncStatus.value = "syncing";
         syncError.value = null;
@@ -438,7 +388,7 @@ export const useCollectionStore = defineStore("collection", () => {
             adoptMerged(merged);
             lastSyncedAt.value = now();
             syncStatus.value = "ok";
-            startPolling();
+            startStream();
             return { ok: true, code };
         } catch (err) {
             syncCode.value = null;
@@ -460,7 +410,7 @@ export const useCollectionStore = defineStore("collection", () => {
             adoptMerged(merged);
             lastSyncedAt.value = now();
             syncStatus.value = "ok";
-            startPolling();
+            startStream();
             return { ok: true };
         } catch (err) {
             const e = err instanceof SyncError ? (err.code ?? err.message) : "unknown";
@@ -472,37 +422,41 @@ export const useCollectionStore = defineStore("collection", () => {
 
     function disableSync(): void {
         clearTimeout(syncTimer);
-        stopPolling();
+        stopStream();
         syncCode.value = null;
         syncStatus.value = "idle";
         syncError.value = null;
         lastSyncedAt.value = null;
     }
 
-    // Background pull: while sync is on, periodically pull remote changes so
-    // other devices' edits show up without requiring a local edit first.
-    let pollTimer: ReturnType<typeof setInterval> | undefined;
-    function startPolling(): void {
-        stopPolling();
+    // Live updates: subscribe to the server's event stream so other devices'
+    // changes are pulled the instant they happen (EventSource auto-reconnects).
+    let closeStream: (() => void) | undefined;
+    function startStream(): void {
+        stopStream();
         if (!syncCode.value) return;
-        pollTimer = setInterval(() => {
-            if (syncStatus.value !== "syncing") void syncNow();
-        }, POLL_INTERVAL);
+        closeStream = openEventStream(syncCode.value, () => void pullSync());
     }
-    function stopPolling(): void {
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = undefined;
+    function stopStream(): void {
+        closeStream?.();
+        closeStream = undefined;
     }
 
-    // If a sync code was restored from a previous session, sync immediately and
-    // start polling. Also re-sync whenever the tab regains focus.
+    // If a sync code was restored from a previous session, sync now and open the
+    // stream. On tab hide, flush any pending push; on show, catch up + reconnect.
     if (syncCode.value) {
         void syncNow();
-        startPolling();
+        startStream();
     }
     if (typeof document !== "undefined") {
         document.addEventListener("visibilitychange", () => {
-            if (!document.hidden && syncCode.value && syncStatus.value !== "syncing") void syncNow();
+            if (!syncCode.value) return;
+            if (document.hidden) {
+                if (pendingPush) void syncNow();
+            } else {
+                void pullSync();
+                if (!closeStream) startStream();
+            }
         });
     }
 
@@ -538,6 +492,7 @@ export const useCollectionStore = defineStore("collection", () => {
         activeId,
         activeCollection,
         activeName,
+        activeLocked,
         computeStats,
         allCollectionStats,
         createCollection,
@@ -545,6 +500,7 @@ export const useCollectionStore = defineStore("collection", () => {
         duplicateCollection,
         deleteCollection,
         setActiveCollection,
+        toggleLock,
         // sync
         syncCode,
         syncStatus,
