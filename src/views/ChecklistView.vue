@@ -359,6 +359,8 @@ function clearAll(g: Group) {
     flex: none;
 }
 .group__name {
+    flex: 1 1 auto;
+    min-width: 0;
     font-family: var(--font-display);
     font-weight: 700;
     font-size: 1.05rem;
@@ -366,7 +368,6 @@ function clearAll(g: Group) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    min-width: 0;
 }
 .group__tag {
     flex: none;
@@ -380,7 +381,6 @@ function clearAll(g: Group) {
     color: var(--wc-muted);
 }
 .group__prog {
-    margin-left: auto;
     flex: none;
     font-size: 0.82rem;
     font-weight: 700;

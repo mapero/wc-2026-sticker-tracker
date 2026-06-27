@@ -91,6 +91,7 @@ function onClick(e: MouseEvent) {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    min-width: 0; /* allow the cell to shrink to its grid track so the label truncates */
     min-height: 46px;
     padding: 6px 10px;
     border-radius: var(--radius-sm);
@@ -178,6 +179,8 @@ function onClick(e: MouseEvent) {
     flex: none;
 }
 .cell__label {
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 0.8rem;
     color: var(--wc-muted);
     overflow: hidden;
