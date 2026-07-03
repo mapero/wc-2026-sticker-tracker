@@ -1,5 +1,4 @@
-export function downloadText(filename: string, text: string, mimeType: string): void {
-    const blob = new Blob([text], { type: mimeType });
+export function downloadBlob(filename: string, blob: Blob): void {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -8,6 +7,10 @@ export function downloadText(filename: string, text: string, mimeType: string): 
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+}
+
+export function downloadText(filename: string, text: string, mimeType: string): void {
+    downloadBlob(filename, new Blob([text], { type: mimeType }));
 }
 
 export async function copyText(text: string): Promise<boolean> {

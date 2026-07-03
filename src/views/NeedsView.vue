@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from "vue";
-import { PartyPopper, Copy, ClipboardCheck, Download } from "lucide-vue-next";
+import { PartyPopper, Copy, ClipboardCheck, Download, FileDown } from "lucide-vue-next";
 import { useNeedsExport } from "@/composables/useNeedsExport";
-import { downloadText, copyText } from "@/utils/download";
+import { downloadText, downloadBlob, copyText } from "@/utils/download";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseChip from "@/components/base/BaseChip.vue";
 import BackupCard from "@/components/needs/BackupCard.vue";
 import FormatOptions from "@/components/needs/FormatOptions.vue";
 
-const { grouping, detail, compactness, includeIntro, neededCount, swapCount, needsText, swapsText } = useNeedsExport();
+const { grouping, detail, compactness, includeIntro, neededCount, swapCount, needsText, swapsText, makePdf } =
+    useNeedsExport();
 
 type Toast = "needs" | "swaps";
 const copied = ref<Record<Toast, boolean>>({ needs: false, swaps: false });
@@ -31,6 +32,10 @@ function onDownloadNeeds(): void {
 
 function onDownloadSwaps(): void {
     downloadText("wc2026-swaps.txt", swapsText.value, "text/plain;charset=utf-8");
+}
+
+function onDownloadPdf(): void {
+    downloadBlob("wc2026-needs-swaps.pdf", makePdf());
 }
 
 onBeforeUnmount(() => {
@@ -133,6 +138,16 @@ onBeforeUnmount(() => {
             </div>
         </section>
 
+        <section class="panel card card--pdf">
+            <div>
+                <h2 class="card__title">{{ $t("pdf-export") }}</h2>
+                <p class="card__desc">{{ $t("pdf-export-desc") }}</p>
+            </div>
+            <base-button variant="primary" @click="onDownloadPdf">
+                <file-down :size="16" /> {{ $t("download-pdf") }}
+            </base-button>
+        </section>
+
         <backup-card />
     </div>
 </template>
@@ -210,6 +225,19 @@ onBeforeUnmount(() => {
 
 .card--preview {
     min-height: 0;
+}
+
+.card--pdf {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+.card--pdf > div {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 .out {
     width: 100%;

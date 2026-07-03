@@ -2,6 +2,7 @@ import { computed, ref, type ComputedRef, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { ALBUM_META, TOTAL_STICKERS, INTRO_SECTION, type Sticker } from "@/data/album";
 import { useCollectionStore } from "@/stores/collection";
+import { textPdf, type PdfLine } from "@/utils/pdf";
 
 export type Grouping = "team" | "flat";
 export type Detail = "codes" | "names";
@@ -22,6 +23,7 @@ export interface UseNeedsExport {
     swapCount: ComputedRef<number>;
     needsText: ComputedRef<string>;
     swapsText: ComputedRef<string>;
+    makePdf: () => Blob;
 }
 
 function groupBySection(stickers: Sticker[]): SectionGroup[] {
@@ -124,6 +126,50 @@ export function useNeedsExport(): UseNeedsExport {
         return renderList(swapStickers.value, title, t("export-no-duplicates"));
     });
 
+    // Compact PDF with both lists in a fixed format (grouped, codes only,
+    // full album) - the on-screen format options don't apply here.
+    function makePdf(): Blob {
+        const lines: PdfLine[] = [{ text: ALBUM_META.title, bold: true, size: 14 }];
+
+        const missing = store.missingStickers;
+        lines.push({
+            text: t("export-needs-title", { needed: missing.length, total: TOTAL_STICKERS }),
+            bold: true,
+            size: 10.5,
+            gapBefore: 10,
+        });
+        if (missing.length === 0) {
+            lines.push({ text: t("export-album-complete"), gapBefore: 2 });
+        } else {
+            for (const g of groupBySection(missing)) {
+                lines.push({ text: `${g.header}: ${g.stickers.map((s) => s.code).join(", ")}`, gapBefore: 2 });
+            }
+        }
+
+        const dupes = store.duplicateStickers;
+        const spareTotal = dupes.reduce((sum, d) => sum + d.spare, 0);
+        lines.push({
+            text: t("export-swaps-title", { count: spareTotal }),
+            bold: true,
+            size: 10.5,
+            gapBefore: 14,
+        });
+        if (dupes.length === 0) {
+            lines.push({ text: t("export-no-duplicates"), gapBefore: 2 });
+        } else {
+            const spareByCode = new Map(dupes.map((d) => [d.sticker.code, d.spare]));
+            for (const g of groupBySection(dupes.map((d) => d.sticker))) {
+                const entries = g.stickers.map((s) => {
+                    const spare = spareByCode.get(s.code) ?? 1;
+                    return spare > 1 ? `${s.code} x${spare}` : s.code;
+                });
+                lines.push({ text: `${g.header}: ${entries.join(", ")}`, gapBefore: 2 });
+            }
+        }
+
+        return textPdf(lines);
+    }
+
     return {
         grouping,
         detail,
@@ -133,5 +179,6 @@ export function useNeedsExport(): UseNeedsExport {
         swapCount,
         needsText,
         swapsText,
+        makePdf,
     };
 }
