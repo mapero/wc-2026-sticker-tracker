@@ -8,6 +8,7 @@ export interface PdfLine {
     bold?: boolean;
     size?: number;
     gapBefore?: number;
+    pageBreak?: boolean; // start this line on a fresh page
 }
 
 const PAGE_W = 595.28; // A4 portrait, in points
@@ -70,6 +71,7 @@ interface Segment {
     size: number;
     x: number;
     gapBefore: number;
+    pageBreak: boolean;
 }
 
 // Word-wrap a body line to the page width using Courier's fixed glyph width.
@@ -77,8 +79,9 @@ interface Segment {
 function wrap(line: PdfLine): Segment[] {
     const size = line.size ?? BODY_SIZE;
     const bold = line.bold ?? false;
+    const pageBreak = line.pageBreak ?? false;
     if (bold) {
-        return [{ text: line.text, bold, size, x: MARGIN, gapBefore: line.gapBefore ?? 0 }];
+        return [{ text: line.text, bold, size, x: MARGIN, gapBefore: line.gapBefore ?? 0, pageBreak }];
     }
 
     const charW = size * COURIER_WIDTH;
@@ -100,6 +103,7 @@ function wrap(line: PdfLine): Segment[] {
             size,
             x: first ? MARGIN : MARGIN + WRAP_INDENT,
             gapBefore: first ? (line.gapBefore ?? 0) : 0,
+            pageBreak: first && pageBreak,
         });
         rest = rest.slice(cut).trimStart();
     }
@@ -115,8 +119,9 @@ export function textPdf(lines: PdfLine[]): Blob {
     let y = PAGE_H - MARGIN;
     for (const seg of lines.flatMap(wrap)) {
         const lineHeight = seg.size * LINE_HEIGHT;
+        const forceBreak = seg.pageBreak && pages[pages.length - 1].length > 0;
         y -= seg.gapBefore + lineHeight;
-        if (y < MARGIN) {
+        if (forceBreak || y < MARGIN) {
             pages.push([]);
             y = PAGE_H - MARGIN - lineHeight;
         }

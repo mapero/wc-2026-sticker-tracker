@@ -129,7 +129,7 @@ export function useNeedsExport(): UseNeedsExport {
     // Compact PDF with both lists in a fixed format (grouped, codes only,
     // full album) - the on-screen format options don't apply here.
     function makePdf(): Blob {
-        const lines: PdfLine[] = [{ text: ALBUM_META.title, bold: true, size: 14 }];
+        const lines: PdfLine[] = [{ text: `${ALBUM_META.title} · ${store.activeName}`, bold: true, size: 14 }];
 
         const missing = store.missingStickers;
         lines.push({
@@ -152,7 +152,7 @@ export function useNeedsExport(): UseNeedsExport {
             text: t("export-swaps-title", { count: spareTotal }),
             bold: true,
             size: 10.5,
-            gapBefore: 14,
+            pageBreak: true,
         });
         if (dupes.length === 0) {
             lines.push({ text: t("export-no-duplicates"), gapBefore: 2 });
