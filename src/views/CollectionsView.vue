@@ -104,8 +104,7 @@ const lastSyncedText = computed(() =>
                 </div>
 
                 <div class="col__statline num">
-                    <span class="col__owned">{{ stats.owned }}</span
-                    ><span class="col__slash">/</span>{{ stats.total }}
+                    <span class="col__owned">{{ stats.owned }}</span><span class="col__slash">/</span>{{ stats.total }}
                     <span class="col__pct">· {{ $t("n-percent-complete", { n: stats.percent }) }}</span>
                 </div>
 

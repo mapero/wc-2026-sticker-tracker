@@ -99,8 +99,8 @@ function exportCollection() {
 
                 <div class="progress">
                     <div class="progress__stat num">
-                        <strong>{{ store.ownedCount }}</strong
-                        ><span class="progress__slash">/</span>{{ store.totalCount }}
+                        <strong>{{ store.ownedCount }}</strong><span class="progress__slash">/</span
+                        >{{ store.totalCount }}
                     </div>
                     <div
                         class="progress__bar"

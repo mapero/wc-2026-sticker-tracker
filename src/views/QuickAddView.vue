@@ -94,8 +94,9 @@ onMounted(() => inputEl.value?.focus());
         <header class="quick__head">
             <h1 class="quick__title">{{ $t("log-your-finds") }}</h1>
             <p class="quick__lede">
-                {{ $t("type-the-code-from-the-back-of-each-sticker-and-press") }} <kbd>{{ $t("enter") }}</kbd
-                >{{ $t("got-a-pile-paste-or-scan-them-all-at-once-separated-by-spaces-commas-or-new-lines") }}
+                {{ $t("type-the-code-from-the-back-of-each-sticker-and-press") }} <kbd>{{ $t("enter") }}</kbd>{{
+                    $t("got-a-pile-paste-or-scan-them-all-at-once-separated-by-spaces-commas-or-new-lines")
+                }}
             </p>
         </header>
 
