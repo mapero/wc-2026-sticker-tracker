@@ -1,6 +1,10 @@
 # Sync backend — Node's built-in SQLite needs Node >= 22.5 (no native build).
 FROM node:24-alpine
 
+# Refresh OS packages to pick up security fixes newer than the base image
+# (e.g. zlib 1.4 — flagged by image scanners).
+RUN apk upgrade --no-cache
+
 WORKDIR /app
 
 # Install only production deps (express + cors) against the lockfile.
